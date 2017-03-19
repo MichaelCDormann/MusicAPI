@@ -1,17 +1,68 @@
 from collections import deque
 import re
 
+
+TABLE = [
+    {"term": "s2", "(": "s3", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": 1,    "op": None},
+    {"term": None, "(": None, ")": None, "&&": "s5", "||": "s6", "$":"acc", "stmt'": None, "stmt": None, "op": 4},
+    {"term": None, "(": None, ")": None, "&&": "r1", "||": "r1", "$": "r1", "stmt'": None, "stmt": None, "op": None},
+    {"term": "s8", "(": "s9", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": 7,    "op": None},
+    {"term": "s2", "(": "s3", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": 10,   "op": None},
+    {"term": "r4", "(": "r4", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": None, "op": None},
+    {"term": "r5", "(": "r5", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": None, "op": None},
+    {"term": None, "(": None, ")":"s11", "&&": "s5", "||": "s6", "$": None, "stmt'": None, "stmt": None, "op": 12},
+    {"term": None, "(": None, ")": "r1", "&&": "r1", "||": "r1", "$": None, "stmt'": None, "stmt": None, "op": None},
+    {"term": "s8", "(": "s9", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": 13,   "op": None},
+    {"term": None, "(": None, ")": None, "&&": "r3", "||": "r3", "$": "r3", "stmt'": None, "stmt": None, "op": 4},
+    {"term": None, "(": None, ")": None, "&&": "r2", "||": "r2", "$": "r2", "stmt'": None, "stmt": None, "op": None},
+    {"term": "s8", "(": "s9", ")": None, "&&": None, "||": None, "$": None, "stmt'": None, "stmt": 14,   "op": None},
+    {"term": None, "(": None, ")":"s15", "&&": "s5", "||": "s6", "$": None, "stmt'": None, "stmt": None, "op": 12},
+    {"term": None, "(": None, ")": "r3", "&&": "r3", "||": "r3", "$": None, "stmt'": None, "stmt": None, "op": 12},
+    {"term": None, "(": None, ")": "r2", "&&": "r2", "||": "r2", "$": None, "stmt'": None, "stmt": None, "op": None},
+]
+
+PRODUCTIONS = [
+    ("stmt'",   ["stmt"]),
+    ("stmt",    ["term"]),
+    ("stmt",    ["(", "stmt", ")"]),
+    ("stmt",    ["stmt", "op", "stmt"]),
+    ("op",      ["&&"]),
+    ("op",      ["||"]),
+]
+
+
 class MusicQueuer(object):
 
-    def __init__(self, table, productions, api):
-        self._prod = productions
-        self._table = table
+    def __init__(self, api):
+        self._prod = PRODUCTIONS
+        self._table = TABLE
         self._api = api
 
         self._stack = [0]
         self.queue = []
+        self.queue_size = 0
 
         self._op = None
+
+    def addPlaylist(self, playlist_list):
+        requested_shared_playlist_tokens = []
+
+        user_playlists = self._api.get_all_playlists()
+        for playlist in user_playlists:
+            if playlist['name'].lower() in playlist_list and playlist['type'] == 'SHARED':
+                requested_shared_playlist_tokens.append(playlist['shareToken'])
+
+        playlist_contents = self._api.get_all_user_playlist_contents()
+        for playlist in playlist_contents:
+            if playlist['name'].lower() in playlist_list:
+                for track in playlist['tracks']:
+                    if 'track' in list(track.keys()):
+                        self.queue.append(track['track'])
+
+        for token in requested_shared_playlist_tokens:
+            playlist_songs = self._api.get_shared_playlist_contents(token)
+            for song in playlist_songs:
+                self.queue.append(song['track'])
 
     def __updateQueue(self, value):
         value = value.lower()
@@ -55,6 +106,8 @@ class MusicQueuer(object):
                 if action ^ notOp:
                     self.queue.remove(song)
 
+        self.queue_size = len(self.queue)
+
 
     def __reduce(self, production):
         reduction = production[0]
@@ -75,18 +128,8 @@ class MusicQueuer(object):
 
                     if doUpdate:
                         if (prod[0] == "stmt" or prod[0] == "op") and prod[1] != "stmt":
-                            #self.__updateQueue(prod[1])
                             items_to_query.append(prod[1])
-                        #elif prod[0] == "op":
-                        #    if prod[1] == "&&":
-                        #        self._op = "and"
-                        #    elif prod[1] == "||":
-                        #        self._op = "or"
-
                     terms.pop()
-            #elif self._stack[-1] == terms[-1]:
-            #    self._stack.pop()
-            #    terms.pop()
             else:
                 raise Exception("Reduce error - String doesn't match grammar productions")
 
@@ -135,6 +178,13 @@ class MusicQueuer(object):
         return token_lexeme_list
 
     def parse(self, string):
+        self._stack = [0]
+        self.queue = []
+        self.queue_size = 0
+
+        self._op = None
+
+        string = string.lower()
         token_lexeme_list = deque(self.__tokenize(string))
 
         if token_lexeme_list is None:
